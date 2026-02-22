@@ -1,37 +1,49 @@
 import java.util.*;
-
 public class HostelFeeCalculator {
+
+    private final List<RoomPriceRule> roomRules;
+    private final List<AddOnRule> addOnRules;
     private final FakeBookingRepo repo;
+    private final ReceiptPrinterService printer;
+    private final BookingIdGenerator idGen;
 
-    public HostelFeeCalculator(FakeBookingRepo repo) { this.repo = repo; }
-
-    // OCP violation: switch + add-on branching + printing + persistence.
-    public void process(BookingRequest req) {
-        Money monthly = calculateMonthly(req);
-        Money deposit = new Money(5000.00);
-
-        ReceiptPrinter.print(req, monthly, deposit);
-
-        String bookingId = "H-" + (7000 + new Random(1).nextInt(1000)); // deterministic-ish
-        repo.save(bookingId, req, monthly, deposit);
+    public HostelFeeCalculator(
+            List<RoomPriceRule> roomRules,
+            List<AddOnRule> addOnRules,
+            FakeBookingRepo repo, ReceiptPrinterService printer,
+            BookingIdGenerator idGen) {
+        this.roomRules = roomRules;
+        this.addOnRules = addOnRules;
+        this.repo = repo;
+        this.printer = printer;
+        this.idGen = idGen;
     }
 
-    private Money calculateMonthly(BookingRequest req) {
-        double base;
-        switch (req.roomType) {
-            case LegacyRoomTypes.SINGLE -> base = 14000.0;
-            case LegacyRoomTypes.DOUBLE -> base = 15000.0;
-            case LegacyRoomTypes.TRIPLE -> base = 12000.0;
-            default -> base = 16000.0;
+    public void process(BookingRequest req) {
+
+        double base = 0;
+
+        for (RoomPriceRule r : roomRules) {
+            if (r.supports(req.roomType)) {
+                base = r.basePrice();
+                break;
+            }
         }
 
-        double add = 0.0;
-        for (AddOn a : req.addOns) {
-            if (a == AddOn.MESS) add += 1000.0;
-            else if (a == AddOn.LAUNDRY) add += 500.0;
-            else if (a == AddOn.GYM) add += 300.0;
+        double addOns = 0;
+
+        for (AddOnRule a : addOnRules) {
+            addOns += a.apply(req);
         }
 
-        return new Money(base + add);
+        double total = base + addOns;
+
+        Money monthly = new Money(total);
+        Money deposit = new Money(5000);
+
+        printer.print(req, monthly, deposit);
+        String bookingId = idGen.next();
+
+        repo.save(bookingId, req, monthly, deposit);
     }
 }
