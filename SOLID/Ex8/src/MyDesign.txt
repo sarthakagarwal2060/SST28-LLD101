@@ -1,0 +1,120 @@
+====== BudgetLedger.java ======
+public class BudgetLedger {
+    private double balance = 0.0;
+    public void add(double amt, String note) {
+        balance += amt;
+        if (amt >= 0) System.out.println("Ledger: +" + (int)amt + " (" + note + ")");
+        else System.out.println("Ledger: " + (int)amt + " (" + note + ")");
+    }
+    public int balanceInt() { return (int)balance; }
+}
+
+====== ClubAdminTools.java ======
+public interface ClubAdminTools {
+    // Fat interface (ISP violation)
+    void addIncome(double amt, String note);
+    void addExpense(double amt, String note);
+    void addMinutes(String text);
+    void createEvent(String name, double budget);
+    int getEventsCount();
+}
+
+====== ClubConsole.java ======
+public class ClubConsole {
+    private final BudgetLedger ledger;
+    private final MinutesBook minutes;
+    private final EventPlanner events;
+
+    public ClubConsole(BudgetLedger ledger, MinutesBook minutes, EventPlanner events) {
+        this.ledger = ledger; this.minutes = minutes; this.events = events;
+    }
+
+    public void run() {
+        ClubAdminTools treasurer = new TreasurerTool(ledger);
+        ClubAdminTools secretary = new SecretaryTool(minutes);
+        ClubAdminTools lead = new EventLeadTool(events);
+
+        treasurer.addIncome(5000, "sponsor");
+        secretary.addMinutes("Meeting at 5pm");
+        lead.createEvent("HackNight", 2000);
+
+        System.out.println("Summary: ledgerBalance=" + ledger.balanceInt() + ", minutes=" + minutes.count() + ", events=" + lead.getEventsCount());
+    }
+}
+
+====== EventLeadTool.java ======
+public class EventLeadTool implements ClubAdminTools {
+    private final EventPlanner planner;
+    public EventLeadTool(EventPlanner planner) { this.planner = planner; }
+
+    @Override public void createEvent(String name, double budget) { planner.create(name, budget); }
+    @Override public int getEventsCount() { return planner.count(); }
+
+    @Override public void addIncome(double amt, String note) { /* irrelevant */ }
+    @Override public void addExpense(double amt, String note) { /* irrelevant */ }
+    @Override public void addMinutes(String text) { /* irrelevant */ }
+}
+
+====== EventPlanner.java ======
+import java.util.*;
+
+public class EventPlanner {
+    private final List<String> events = new ArrayList<>();
+    public void create(String name, double budget) {
+        events.add(name);
+        System.out.println("Event created: " + name + " (budget=" + (int)budget + ")");
+    }
+    public int count() { return events.size(); }
+}
+
+====== Main.java ======
+public class Main {
+    public static void main(String[] args) {
+        System.out.println("=== Club Admin ===");
+        BudgetLedger ledger = new BudgetLedger();
+        MinutesBook minutes = new MinutesBook();
+        EventPlanner events = new EventPlanner();
+
+        ClubConsole console = new ClubConsole(ledger, minutes, events);
+        console.run();
+    }
+}
+
+====== MinutesBook.java ======
+import java.util.*;
+
+public class MinutesBook {
+    private final List<String> items = new ArrayList<>();
+    public void add(String text) {
+        items.add(text);
+        System.out.println("Minutes added: \"" + text + "\"");
+    }
+    public int count() { return items.size(); }
+}
+
+====== SecretaryTool.java ======
+public class SecretaryTool implements ClubAdminTools {
+    private final MinutesBook book;
+    public SecretaryTool(MinutesBook book) { this.book = book; }
+
+    @Override public void addMinutes(String text) { book.add(text); }
+
+    @Override public void addIncome(double amt, String note) { /* irrelevant */ }
+    @Override public void addExpense(double amt, String note) { /* irrelevant */ }
+    @Override public void createEvent(String name, double budget) { /* irrelevant */ }
+    @Override public int getEventsCount() { return 0; }
+}
+
+====== TreasurerTool.java ======
+public class TreasurerTool implements ClubAdminTools {
+    private final BudgetLedger ledger;
+    public TreasurerTool(BudgetLedger ledger) { this.ledger = ledger; }
+
+    @Override public void addIncome(double amt, String note) { ledger.add(amt, note); }
+    @Override public void addExpense(double amt, String note) { ledger.add(-amt, note); }
+
+    @Override public void addMinutes(String text) { /* irrelevant */ }
+    @Override public void createEvent(String name, double budget) { /* irrelevant */ }
+    @Override public int getEventsCount() { return 0; } // dummy
+}
+

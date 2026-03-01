@@ -1,0 +1,378 @@
+====== CafeteriaSystem.java ======
+import java.util.*;
+
+public class CafeteriaSystem {
+    private final Map<String, MenuItem> menu = new LinkedHashMap<>();
+    private final FileStore store = new FileStore();
+    private final TaxCalculator taxCalculator;
+    private final DiscountCalculator discountCalculator;
+    private final PricingCalculator pricingCalculator;
+    private final InvoiceFormatter invoiceFormatter = new InvoiceFormatter();
+    private int invoiceSeq = 1000;
+
+    public CafeteriaSystem(TaxCalculator taxCalculator, DiscountCalculator discountCalculator) {
+        this.taxCalculator = taxCalculator;
+        this.discountCalculator = discountCalculator;
+        this.pricingCalculator = new PricingCalculator(menu);
+    }
+
+    public void addToMenu(MenuItem i) {
+        menu.put(i.id, i);
+    }
+
+    public void checkout(String customerType, List<OrderLine> lines) {
+        String invId = "INV-" + (++invoiceSeq);
+        List<InvoiceLine> invoiceLines = new ArrayList<>();
+        double subtotal = pricingCalculator.calculateSubtotal(lines, invoiceLines);
+
+        double taxPct = taxCalculator.calculateTaxPercent(customerType);
+        double tax = subtotal * (taxPct / 100.0);
+
+        double discount = discountCalculator.calculateDiscount(customerType, subtotal, lines.size());
+
+        double total = subtotal + tax - discount;
+
+        Invoice invoice = new Invoice(invId, invoiceLines, subtotal, taxPct, tax, discount, total);
+
+        String printable = invoiceFormatter.format(invoice);
+        System.out.print(printable);
+
+        store.save(invId, printable);
+        System.out.println("Saved invoice: " + invId + " (lines=" + store.countLines(invId) + ")");
+    }
+}
+
+====== DefaultDiscountRule.java ======
+public class DefaultDiscountRule implements DiscountRule {
+    @Override
+    public boolean isApplicable(String customerType) {
+        return true;
+    }
+    @Override
+    public double calculateDiscount(double subtotal, int distinctLines) {
+        return 0.0;
+    }
+}
+
+====== DefaultTaxRule.java ======
+public class DefaultTaxRule implements TaxRule {
+    @Override
+    public boolean isApplicable(String customerType) {
+        return true;
+    }
+    @Override
+    public double getTaxPercent() {
+        return 8.0;
+    }
+}
+
+====== Demo02.java ======
+import java.util.*;
+
+public class Demo02 {
+    public static void main(String[] args) {
+        System.out.println("=== Cafeteria Billing ===");
+
+        TaxCalculator taxCalc = new TaxCalculator(List.of(
+                new StudentTaxRule(),
+                new StaffTaxRule(),
+                new DefaultTaxRule()));
+        DiscountCalculator distCalc = new DiscountCalculator(List.of(
+                new StudentDiscountRule(),
+                new StaffDiscountRule(),
+                new DefaultDiscountRule()));
+
+        CafeteriaSystem sys = new CafeteriaSystem(taxCalc, distCalc);
+
+        sys.addToMenu(new MenuItem("M1", "Veg Thali", 80.00));
+        sys.addToMenu(new MenuItem("C1", "Coffee", 30.00));
+        sys.addToMenu(new MenuItem("S1", "Sandwich", 60.00));
+
+        List<OrderLine> order = List.of(
+                new OrderLine("M1", 2),
+                new OrderLine("C1", 1));
+
+        sys.checkout("student", order);
+    }
+}
+
+====== DiscountCalculator.java ======
+import java.util.List;
+
+public class DiscountCalculator {
+    private final List<DiscountRule> rules;
+
+    public DiscountCalculator(List<DiscountRule> rules) {
+        this.rules = rules;
+    }
+
+    public double calculateDiscount(String customerType, double subtotal, int distinctLines) {
+        for (DiscountRule rule : rules) {
+            if (rule.isApplicable(customerType)) {
+                return rule.calculateDiscount(subtotal, distinctLines);
+            }
+        }
+        return 0.0;
+    }
+}
+
+====== DiscountRule.java ======
+public interface DiscountRule {
+    boolean isApplicable(String customerType);
+    double calculateDiscount(double subtotal, int distinctLines);
+}
+
+====== DiscountRules.java ======
+public class DiscountRules {
+    public static double discountAmount(String customerType, double subtotal, int distinctLines) {
+        // hard-coded policy (smell)
+        if ("student".equalsIgnoreCase(customerType)) {
+            if (subtotal >= 180.0)
+                return 10.0;
+            return 0.0;
+        }
+        if ("staff".equalsIgnoreCase(customerType)) {
+            if (distinctLines >= 3)
+                return 15.0;
+            return 5.0;
+        }
+        return 0.0;
+    }
+}
+
+====== FileStore.java ======
+import java.util.*;
+
+public class FileStore {
+    private final Map<String, String> files = new HashMap<>();
+
+    public void save(String name, String content) {
+        files.put(name, content);
+    }
+
+    public int countLines(String name) {
+        String c = files.getOrDefault(name, "");
+        if (c.isEmpty())
+            return 0;
+        return c.split("\n").length;
+    }
+}
+
+====== Invoice.java ======
+import java.util.List;
+
+public class Invoice {
+    public final String id;
+    public final List<InvoiceLine> lines;
+    public final double subtotal;
+    public final double taxPercent;
+    public final double taxAmount;
+    public final double discount;
+    public final double total;
+
+    public Invoice(String id, List<InvoiceLine> lines, double subtotal, double taxPercent, double taxAmount,
+            double discount, double total) {
+        this.id = id;
+        this.lines = lines;
+        this.subtotal = subtotal;
+        this.taxPercent = taxPercent;
+        this.taxAmount = taxAmount;
+        this.discount = discount;
+        this.total = total;
+    }
+}
+
+====== InvoiceFormatter.java ======
+public class InvoiceFormatter {
+    public String format(Invoice invoice) {
+        StringBuilder out = new StringBuilder();
+        out.append("Invoice# ").append(invoice.id).append("\n");
+
+        for (InvoiceLine l : invoice.lines) {
+            out.append(String.format("- %s x%d = %.2f\n", l.itemName, l.qty, l.lineTotal));
+        }
+
+        out.append(String.format("Subtotal: %.2f\n", invoice.subtotal));
+        out.append(String.format("Tax(%.0f%%): %.2f\n", invoice.taxPercent, invoice.taxAmount));
+        out.append(String.format("Discount: -%.2f\n", invoice.discount));
+        out.append(String.format("TOTAL: %.2f\n", invoice.total));
+
+        return out.toString();
+    }
+}
+
+====== InvoiceLine.java ======
+public class InvoiceLine {
+    public final String itemName;
+    public final int qty;
+    public final double lineTotal;
+
+    public InvoiceLine(String itemName, int qty, double lineTotal) {
+        this.itemName = itemName;
+        this.qty = qty;
+        this.lineTotal = lineTotal;
+    }
+}
+
+====== Main.java ======
+import java.util.*;
+
+public class Main {
+        public static void main(String[] args) {
+                System.out.println("=== Cafeteria Billing ===");
+
+                TaxCalculator taxCalc = new TaxCalculator(List.of(
+                                new StudentTaxRule(),
+                                new StaffTaxRule(),
+                                new DefaultTaxRule()));
+                DiscountCalculator distCalc = new DiscountCalculator(List.of(
+                                new StudentDiscountRule(),
+                                new StaffDiscountRule(),
+                                new DefaultDiscountRule()));
+
+                CafeteriaSystem sys = new CafeteriaSystem(taxCalc, distCalc);
+
+                sys.addToMenu(new MenuItem("M1", "Veg Thali", 80.00));
+                sys.addToMenu(new MenuItem("C1", "Coffee", 30.00));
+                sys.addToMenu(new MenuItem("S1", "Sandwich", 60.00));
+
+                List<OrderLine> order = List.of(
+                                new OrderLine("M1", 2),
+                                new OrderLine("C1", 1));
+
+                sys.checkout("student", order);
+        }
+}
+
+====== MenuItem.java ======
+public class MenuItem {
+    public final String id;
+    public final String name;
+    public final double price;
+
+    public MenuItem(String id, String name, double price) {
+        this.id = id; this.name = name; this.price = price;
+    }
+}
+
+====== OrderLine.java ======
+public class OrderLine {
+    public final String itemId;
+    public final int qty;
+
+    public OrderLine(String itemId, int qty) {
+        this.itemId = itemId; this.qty = qty;
+    }
+}
+
+====== PricingCalculator.java ======
+import java.util.List;
+import java.util.Map;
+
+public class PricingCalculator {
+    private final Map<String, MenuItem> menu;
+
+    public PricingCalculator(Map<String, MenuItem> menu) {
+        this.menu = menu;
+    }
+
+    public double calculateSubtotal(List<OrderLine> lines, List<InvoiceLine> invoiceLines) {
+        double subtotal = 0.0;
+        for (OrderLine l : lines) {
+            MenuItem item = menu.get(l.itemId);
+            double lineTotal = item.price * l.qty;
+            subtotal += lineTotal;
+            invoiceLines.add(new InvoiceLine(item.name, l.qty, lineTotal));
+        }
+        return subtotal;
+    }
+}
+
+====== StaffDiscountRule.java ======
+public class StaffDiscountRule implements DiscountRule {
+    @Override
+    public boolean isApplicable(String customerType) {
+        return "staff".equalsIgnoreCase(customerType);
+    }
+    @Override
+    public double calculateDiscount(double subtotal, int distinctLines) {
+        if (distinctLines >= 3) return 15.0;
+        return 5.0;
+    }
+}
+
+====== StaffTaxRule.java ======
+public class StaffTaxRule implements TaxRule {
+    @Override
+    public boolean isApplicable(String customerType) {
+        return "staff".equalsIgnoreCase(customerType);
+    }
+    @Override
+    public double getTaxPercent() {
+        return 2.0;
+    }
+}
+
+====== StudentDiscountRule.java ======
+public class StudentDiscountRule implements DiscountRule {
+    @Override
+    public boolean isApplicable(String customerType) {
+        return "student".equalsIgnoreCase(customerType);
+    }
+    @Override
+    public double calculateDiscount(double subtotal, int distinctLines) {
+        if (subtotal >= 180.0) return 10.0;
+        return 0.0;
+    }
+}
+
+====== StudentTaxRule.java ======
+public class StudentTaxRule implements TaxRule {
+    @Override
+    public boolean isApplicable(String customerType) {
+        return "student".equalsIgnoreCase(customerType);
+    }
+    @Override
+    public double getTaxPercent() {
+        return 5.0;
+    }
+}
+
+====== TaxCalculator.java ======
+import java.util.List;
+
+public class TaxCalculator {
+    private final List<TaxRule> rules;
+
+    public TaxCalculator(List<TaxRule> rules) {
+        this.rules = rules;
+    }
+
+    public double calculateTaxPercent(String customerType) {
+        for (TaxRule rule : rules) {
+            if (rule.isApplicable(customerType)) {
+                return rule.getTaxPercent();
+            }
+        }
+        return 0.0;
+    }
+}
+
+====== TaxRule.java ======
+public interface TaxRule {
+    boolean isApplicable(String customerType);
+    double getTaxPercent();
+}
+
+====== TaxRules.java ======
+public class TaxRules {
+    public static double taxPercent(String customerType) {
+        // hard-coded policy (smell)
+        if ("student".equalsIgnoreCase(customerType))
+            return 5.0;
+        if ("staff".equalsIgnoreCase(customerType))
+            return 2.0;
+        return 8.0;
+    }
+}
+
